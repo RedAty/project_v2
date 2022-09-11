@@ -1,19 +1,22 @@
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera';
 import { Engine } from '@babylonjs/core/Engines/engine';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import {Matrix, Vector3} from '@babylonjs/core/Maths/math.vector';
 import { Scene } from '@babylonjs/core/scene';
 import "@babylonjs/core/Debug/debugLayer"; // Augments the scene with the debug methods
 import "@babylonjs/inspector";
 import {
+    ArcRotateCamera,
     Axis,
-    Color3, CubeTexture, DirectionalLight, GroundMesh, InstancedMesh, Mesh,
-    MeshBuilder, PointLight,
+    Color3, Color4, CubeTexture, DirectionalLight, GroundMesh, InstancedMesh, Mesh,
+    MeshBuilder, PointLight, Quaternion,
     SceneLoader, ShadowGenerator, Space,
     StandardMaterial,
-    Texture
+    Texture, Viewport
 } from "@babylonjs/core";
-import {addLabelToMesh} from "./gui"; // Injects a local ES6 version of the inspector to prevent automatically relying on the none compatible version
+import {addLabelToMesh} from "./gui";
+import {Player} from "./characterController";
+import {PlayerInput} from "./inputController"; // Injects a local ES6 version of the inspector to prevent automatically relying on the none compatible version
 
 // Get the canvas element from the DOM.
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -22,16 +25,21 @@ const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const engine = new Engine(canvas);
 
 const scene = createScene();
-const camera = initializeCamera(scene);
+//const camera = initializeCamera(scene);
+//initializeMinimap(scene);
 createSky(scene);
 const ground = createEarth(scene); //'ground1', { width: 6, height: 6, subdivisions: 2 }, scene
 ground.checkCollisions = true;
-generateRandomTrees(camera, ground);
+generateRandomTrees(ground);
 
-
-engine.runRenderLoop(() => {
-    scene.render();
+initializePlayer(scene).then(()=>{
+    scene.executeWhenReady(()=>{
+        engine.runRenderLoop(() => {
+            scene.render();
+        });
+    });
 });
+
 
 scene.debugLayer.show();
 
@@ -89,11 +97,28 @@ function initializeCamera(scene):FreeCamera {
     const camera:FreeCamera = new FreeCamera("camera1", new Vector3(5, 2, 0), scene);
     camera.setTarget(Vector3.Zero());
     camera.attachControl(canvas, true);
-
+    if (!scene.activeCameras) {
+        scene.activeCameras = [];
+    }
+    camera.layerMask = 1;
+    scene.activeCameras.push(camera);
     //Then apply collisions and gravity to the active camera
     camera.checkCollisions = true;
     camera.applyGravity = true;
     return camera;
+}
+
+function initializeMinimap(scene) {
+    const minimapCamera:ArcRotateCamera = new ArcRotateCamera("Camera", -Math.PI/2, 0.001, 170, Vector3.Zero(), scene);
+    if (!scene.activeCameras) {
+        scene.activeCameras = [];
+    }
+
+    scene.activeCameras.push(minimapCamera);
+
+    minimapCamera.viewport = new Viewport(0.79, 0.79, 0.19, 0.19);
+
+    minimapCamera.layerMask = 2;
 }
 
 /**
@@ -110,21 +135,21 @@ function createScene(): Scene {
 }
 
 /**
- *
- * @param {FreeCamera} camera
  * @param {GroundMesh} ground
  */
-function generateRandomTrees(camera, ground) {
+function generateRandomTrees(ground) {
     const light:DirectionalLight = new DirectionalLight("dir01", new Vector3(0, -1, -0.3), scene);
 
     ground.onReady = function () {
         const shadowGenerator:ShadowGenerator = new ShadowGenerator(1024, light);
+
         SceneLoader.ImportMesh("", "./models/tree/", "tree.babylon", scene, function (newMeshes) {
             //mesh.material.opacityTexture = null;
             const mesh = newMeshes[0] as Mesh;
 
             mesh.material.backFaceCulling = false;
             mesh.isVisible = false;
+            mesh.layerMask = 1;
             mesh.position.y = ground.getHeightAtCoordinates(0, 0); // Getting height from ground object
 
             shadowGenerator.getShadowMap().renderList.push(newMeshes[0]);
@@ -138,7 +163,7 @@ function generateRandomTrees(camera, ground) {
                 const y = ground.getHeightAtCoordinates(x, z); // Getting height from ground object
 
                 newInstance.position = new Vector3(x, y, z);
-
+                newInstance.layerMask = 1;
                 newInstance.rotate(Axis.Y, Math.random() * Math.PI * 2, Space.WORLD);
 
                 const scale = 0.5 + Math.random() * 2;
@@ -150,6 +175,62 @@ function generateRandomTrees(camera, ground) {
             shadowGenerator.usePoissonSampling = true;
         });
     }
+}
+
+async function loadCharacterAssets(scene) {
+
+    async function loadCharacter() {
+        //collision mesh
+        const outer = MeshBuilder.CreateBox("outer", { width: 2, depth: 1, height: 3 }, scene);
+        outer.isVisible = false;
+        outer.isPickable = false;
+        outer.checkCollisions = true;
+
+        //move origin of box collider to the bottom of the mesh (to match player mesh)
+        outer.bakeTransformIntoVertices(Matrix.Translation(0, 1.5, 0))
+
+        //for collisions
+        outer.ellipsoid = new Vector3(1, 1.5, 1);
+        outer.ellipsoidOffset = new Vector3(0, 1.5, 0);
+
+        outer.rotationQuaternion = new Quaternion(0, 1, 0, 0); // rotate the player mesh 180 since we want to see the back of the player
+
+        return SceneLoader.ImportMeshAsync(null, "./models/mixamo/", "leonard.glb", scene).then((result) =>{
+            console.log(result);
+            const root = result.meshes[0];
+            //body is our actual player mesh
+            const body = root;
+            body.parent = outer;
+            body.isPickable = false; //so our raycasts dont hit ourself
+            body.getChildMeshes().forEach(m => {
+                m.isPickable = false;
+            })
+
+            return {
+                mesh: outer as Mesh,
+                animationGroups: result.animationGroups
+            }
+        });
+    }
+    return loadCharacter();
+
+}
+
+async function initializePlayer(scene) {
+    const light = new PointLight("sparklight", new Vector3(0, 0, 0), scene);
+    light.diffuse = new Color3(0.08627450980392157, 0.10980392156862745, 0.15294117647058825);
+    light.intensity = 35;
+    light.radius = 1;
+
+    const shadowGenerator = new ShadowGenerator(1024, light);
+    shadowGenerator.darkness = 0.4;
+
+    const assets = await loadCharacterAssets(scene);
+    const _input = new PlayerInput(scene); //detect keyboard/mobile inputs
+
+    //Create the player
+    const player = new Player(assets, scene, shadowGenerator, _input);
+    const camera = player.activatePlayerCamera();
 }
 
 function addBoxToScene() {

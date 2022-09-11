@@ -7,10 +7,12 @@ module.exports = {
         path: path.resolve(__dirname, 'dist'),
     },
     mode: 'development',
-    devtool: 'source-map',
+    /*devtool: 'eval-cheap-module-source-map',*/
     optimization: {
-        usedExports: true,
+        //minimize: false,
+        usedExports: true
     },
+    devtool: 'source-map',
     resolve: {
         extensions: [".ts", ".js", ".tsx"],
     },
