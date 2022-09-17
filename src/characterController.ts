@@ -1,4 +1,24 @@
-import { Scene, Vector3, Ray, TransformNode, Mesh, Color3, Color4, UniversalCamera, Quaternion, AnimationGroup, ExecuteCodeAction, ActionManager, ParticleSystem, Texture, SphereParticleEmitter, Sound, Observable, ShadowGenerator } from "@babylonjs/core";
+import {
+    Scene,
+    Vector3,
+    Ray,
+    TransformNode,
+    Mesh,
+    Color3,
+    Color4,
+    UniversalCamera,
+    Quaternion,
+    AnimationGroup,
+    ExecuteCodeAction,
+    ActionManager,
+    ParticleSystem,
+    Texture,
+    SphereParticleEmitter,
+    Sound,
+    Observable,
+    ShadowGenerator,
+    ArcRotateCamera
+} from "@babylonjs/core";
 import { PlayerInput } from "./inputController";
 
 export class Player extends TransformNode {
@@ -34,6 +54,7 @@ export class Player extends TransformNode {
     private static readonly DASH_TIME: number = 10; //how many frames the dash lasts
     private static readonly DOWN_TILT: Vector3 = new Vector3(0.8290313946973066, 0, 0);
     private static readonly ORIGINAL_TILT: Vector3 = new Vector3(0.5934119456780721, 0, 0);
+    private static readonly UP_TILT: Vector3 = new Vector3(0.2934119456780721, 0, 0);
     public dashTime: number = 0;
 
     //player movement vars
@@ -54,26 +75,11 @@ export class Player extends TransformNode {
     private _grounded: boolean;
     private _jumpCount: number = 1;
 
-    //player variables
-    public lanternsLit: number = 1; //num lanterns lit
-    public totalLanterns: number;
-    public win: boolean = false; //whether the game is won
-
     //sparkler
     public sparkler: ParticleSystem; // sparkler particle system
     public sparkLit: boolean = true;
     public sparkReset: boolean = false;
 
-    //moving platforms
-    public _raisePlatform: boolean;
-
-    //sfx
-    public lightSfx: Sound;
-    public sparkResetSfx: Sound;
-    private _resetSfx: Sound;
-    private _walkingSfx: Sound;
-    private _jumpingSfx: Sound;
-    private _dashingSfx: Sound;
 
     //observables
     public onRun = new Observable();
@@ -82,6 +88,7 @@ export class Player extends TransformNode {
     public tutorial_move;
     public tutorial_dash;
     public tutorial_jump;
+    private _animationGroups;
 
     constructor(assets, scene: Scene, shadowGenerator: ShadowGenerator, input?: PlayerInput) {
         super("player", scene);
@@ -90,41 +97,56 @@ export class Player extends TransformNode {
         //set up sounds
         this._loadSounds(this.scene);
         //camera
-        this._setupPlayerCamera();
         this.mesh = assets.mesh;
         this.mesh.parent = this;
+        this._setupPlayerCamera();
 
         this.scene.getLightByName("sparklight").parent = this.scene.getTransformNodeByName("Empty");
 
-        this._idle = assets.animationGroups[1];
-        this._jump = assets.animationGroups[2];
-        this._land = assets.animationGroups[3];
-        this._run = assets.animationGroups[4];
-        this._dash = assets.animationGroups[0];
+        const animGroupNames = [];
+        const animGroupNeededNames = ['idle', 'walk', 'stand', 'run', 'right', 'left', 'magic', 'kick', 'jump', 'dodge', 'boxIdle', 'box'];
 
-        //--COLLISIONS--
-        //this.mesh.actionManager = new ActionManager(this.scene);
+        if(Array.isArray(assets.animationGroups)) {
+            assets.animationGroups.forEach(group=>{
+                animGroupNames.push(group.name.toLowerCase());
+            });
+        }
+        this._animationGroups = {};
+        animGroupNeededNames.forEach(name=>{
+            this._animationGroups[name] = assets.animationGroups[this._getAnimationStartingId(name, animGroupNames)]
+        });
 
-
-        //--SOUNDS--
-        //observable for when to play the walking sfx
-        this.onRun.add((play) => {
-            if (this._walkingSfx) {
-                if (play && !this._walkingSfx.isPlaying) {
-                    this._walkingSfx.play();
-                } else if (!play && this._walkingSfx.isPlaying) {
-                    this._walkingSfx.stop();
-                    this._walkingSfx.isPlaying = false; // make sure that walkingsfx.stop is called only once
-                }
-            }
-
-        })
+        this._idle = this._animationGroups.idle;
+        this._jump = this._animationGroups.jump;
+        this._land = this._animationGroups.stand;
+        this._run = this._animationGroups.run;
+        this._dash = this._animationGroups.dodge;
 
         this._createSparkles(); //create the sparkler particle system
         this._setUpAnimations();
         shadowGenerator.addShadowCaster(assets.mesh);
 
         this._input = input;
+        this._input.attachControl(this._camRoot);
+    }
+
+    /**
+     *
+     * @param {string} name
+     * @param {string[]} groupNames
+     * @returns {number}
+     * @private
+     */
+    private _getAnimationStartingId(name, groupNames) {
+        let selected = 0; // Fallback to default if not exists
+        if (Array.isArray(groupNames)) {
+            groupNames.forEach((_name, index) => {
+                if(_name.startsWith(name)) {
+                    selected = index;
+                }
+            });
+        }
+        return selected;
     }
 
     private _updateFromControls(): void {
@@ -148,7 +170,6 @@ export class Player extends TransformNode {
 
             //sfx and animations
             this._currentAnim = this._dash;
-            this._dashingSfx.play();
 
             //tutorial, if the player dashes for the first time
             if(!this.tutorial_dash){
@@ -190,7 +211,8 @@ export class Player extends TransformNode {
             this._inputAmt = inputMag;
         }
         //final movement that takes into consideration the inputs
-        this._moveDirection = this._moveDirection.scaleInPlace(this._inputAmt * Player.PLAYER_SPEED);
+        const finalSpeed = this._input.dashing && this._grounded ? Player.PLAYER_SPEED * 2 : Player.PLAYER_SPEED;
+        this._moveDirection = this._moveDirection.scaleInPlace(this._inputAmt * finalSpeed);
 
         //check if there is movement to determine if rotation is needed
         let input = new Vector3(this._input.horizontalAxis, 0, this._input.verticalAxis); //along which axis is the direction
@@ -218,12 +240,17 @@ export class Player extends TransformNode {
 
     private _animatePlayer(): void {
         if (!this._dashPressed && !this._isFalling && !this._jumped
-            && (this._input.inputMap["ArrowUp"] || this._input.mobileUp
+            && (this._input.inputMap["ArrowUp"] || this._input.mobileUp || this._input.inputMap["w"]
                 || this._input.inputMap["ArrowDown"] || this._input.mobileDown
                 || this._input.inputMap["ArrowLeft"] || this._input.mobileLeft
                 || this._input.inputMap["ArrowRight"] || this._input.mobileRight)) {
 
-            this._currentAnim = this._run;
+            // If shift is pressed then
+            if (this._input.dashing) {
+                this._currentAnim = this._animationGroups.run;
+            } else {
+                this._currentAnim = this._animationGroups.walk;
+            }
             this.onRun.notifyObservers(true);
         } else if (this._jumped && !this._isFalling && !this._dashPressed) {
             this._currentAnim = this._jump;
@@ -384,7 +411,6 @@ export class Player extends TransformNode {
             //jumping and falling animation flags
             this._jumped = true;
             this._isFalling = false;
-            this._jumpingSfx.play();
 
             //tutorial, if the player jumps for the first time
             if(!this.tutorial_jump){
@@ -401,7 +427,7 @@ export class Player extends TransformNode {
         this._animatePlayer();
     }
 
-    public activatePlayerCamera(): UniversalCamera {
+    public activatePlayerCamera() {
         this.scene.registerBeforeRender(() => {
 
             this._beforeRenderUpdate();
@@ -413,32 +439,6 @@ export class Player extends TransformNode {
 
     //--CAMERA--
     private _updateCamera(): void {
-/*
-        //trigger areas for rotating camera view
-        if (this.mesh.intersectsMesh(this.scene.getMeshByName("cornerTrigger"))) {
-            if (this._input.horizontalAxis > 0) { //rotates to the right
-                this._camRoot.rotation = Vector3.Lerp(this._camRoot.rotation, new Vector3(this._camRoot.rotation.x, Math.PI / 2, this._camRoot.rotation.z), 0.4);
-            } else if (this._input.horizontalAxis < 0) { //rotates to the left
-                this._camRoot.rotation = Vector3.Lerp(this._camRoot.rotation, new Vector3(this._camRoot.rotation.x, Math.PI, this._camRoot.rotation.z), 0.4);
-            }
-        }
-        //rotates the camera to point down at the player when they enter the area, and returns it back to normal when they exit
-        if (this.mesh.intersectsMesh(this.scene.getMeshByName("festivalTrigger"))) {
-            if (this._input.verticalAxis > 0) {
-                this._yTilt.rotation = Vector3.Lerp(this._yTilt.rotation, Player.DOWN_TILT, 0.4);
-            } else if (this._input.verticalAxis < 0) {
-                this._yTilt.rotation = Vector3.Lerp(this._yTilt.rotation, Player.ORIGINAL_TILT, 0.4);
-            }
-        }
-        //once you've reached the destination area, return back to the original orientation, if they leave rotate it to the previous orientation
-        if (this.mesh.intersectsMesh(this.scene.getMeshByName("destinationTrigger"))) {
-            if (this._input.verticalAxis > 0) {
-                this._yTilt.rotation = Vector3.Lerp(this._yTilt.rotation, Player.ORIGINAL_TILT, 0.4);
-            } else if (this._input.verticalAxis < 0) {
-                this._yTilt.rotation = Vector3.Lerp(this._yTilt.rotation, Player.DOWN_TILT, 0.4);
-            }
-        }
-*/
         //update camera postion up/down movement
         let centerPlayer = this.mesh.position.y + 2;
         this._camRoot.position = Vector3.Lerp(this._camRoot.position, new Vector3(this.mesh.position.x, centerPlayer, this.mesh.position.z), 0.4);
@@ -458,11 +458,31 @@ export class Player extends TransformNode {
         this._yTilt = yTilt;
         yTilt.parent = this._camRoot;
 
+        this.camera = new UniversalCamera("cam", new Vector3(0, 0, -10), this.scene);
+/*
         //our actual camera that's pointing at our root's position
-        this.camera = new UniversalCamera("cam", new Vector3(0, 0, -30), this.scene);
-        this.camera.inputs.addMouse();
+        const alpha = -this.mesh.position.y-4.69;
+        const beta = Math.PI/2.5;
+        const target = new Vector3(this.mesh.position.x, this.mesh.position.y+2.5, this.mesh.position.z);
+        this.camera = new ArcRotateCamera("cam", alpha, beta, 5, target, this.scene);
+        // this.camera.inputs.addMouse();
+        //standard camera setting
+        this.camera.wheelPrecision = 15;
+        this.camera.checkCollisions = false;
+        //make sure the keyboard keys controlling camera are different from those controlling player
+        //here we will not use any keyboard keys to control camera
+        this.camera.keysLeft = [];
+        this.camera.keysRight = [];
+        this.camera.keysUp = [];
+        this.camera.keysDown = [];
+        //how close can the camera come to player
+        this.camera.lowerRadiusLimit = 2;
+        //how far can the camera go from the player
+        this.camera.upperRadiusLimit = 20;
 
+        this.camera.lockedTarget = this.mesh.position;*/
         this.camera.lockedTarget = this._camRoot.position;
+        //this.camera.lockedTarget = this.mesh.position;
         this.camera.fov = 0.47350045992678597;
         this.camera.parent = yTilt;
 

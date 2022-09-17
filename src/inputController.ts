@@ -1,9 +1,19 @@
-import { Scene, ActionManager, ExecuteCodeAction, Observer, Scalar } from '@babylonjs/core';
+import {
+    Scene,
+    ActionManager,
+    ExecuteCodeAction,
+    Scalar,
+    PointerInfo,
+} from '@babylonjs/core';
+import {Hud} from "./hud";
+import {PointerEventTypes} from "@babylonjs/core/Events/pointerEvents";
+import {Engine} from "@babylonjs/core/Engines/engine";
 
 export class PlayerInput {
 
     public inputMap: any;
     private _scene: Scene;
+    private _engine: Engine;
 
     //simple movement
     public horizontal: number = 0;
@@ -24,6 +34,13 @@ export class PlayerInput {
     public mobileDown: boolean;
     private _mobileJump: boolean;
     private _mobileDash: boolean;
+    private _ui: Hud;
+    private _isMouseMoving: boolean;
+    private _isMousePosition: any;
+    private _isMouseReference: any;
+    private mouseSensitivity: number;
+    private _allowCameraRotation: any;
+    private _rotationTarget: any;
 
     constructor(scene: Scene) {
 
@@ -35,30 +52,124 @@ export class PlayerInput {
         this.inputMap = {};
         this._scene.actionManager.registerAction(new ExecuteCodeAction(ActionManager.OnKeyDownTrigger, (evt) => {
             //only detect inputs if game isn't paused
-            // if (!this._ui.gamePaused) {
-            this.inputMap[evt.sourceEvent.key] = evt.sourceEvent.type == "keydown";
-            // } else {
-            // this.inputMap[evt.sourceEvent.key] = false;
-            // }
+            if (!this._ui.gamePaused) {
+                this.inputMap[evt.sourceEvent.key] = evt.sourceEvent.type == "keydown";
+            } else {
+                this.inputMap[evt.sourceEvent.key] = false;
+            }
         }));
         this._scene.actionManager.registerAction(new ExecuteCodeAction(ActionManager.OnKeyUpTrigger, (evt) => {
             //only detect inputs if game isn't paused
-            // if (!this._ui.gamePaused) {
-            this.inputMap[evt.sourceEvent.key] = evt.sourceEvent.type == "keydown";
-            // } else {
-            // this.inputMap[evt.sourceEvent.key] = false;
-            // }
+            console.log(evt.sourceEvent.key);
+            if (!this._ui.gamePaused) {
+                this.inputMap[evt.sourceEvent.key] = evt.sourceEvent.type == "keydown";
+            } else {
+                this.inputMap[evt.sourceEvent.key] = false;
+            }
         }));
 
         //add to the scene an observable that calls updateFromKeyboard before rendering
-        scene.onBeforeRenderObservable.add(() => {
+        this._scene.onBeforeRenderObservable.add(() => {
             this._updateFromKeyboard();
         });
 
-        /*// Set up Mobile Controls if on mobile device
+        this.mouseSensitivity = 800.0;
+
+        this._scene.onPointerObservable.add((evt, state) =>{
+
+            switch (evt.type) {
+                case 4:
+                    // Right Click move
+                    this._mouseMove(evt, state);
+                    break;
+                case 1:
+                    // Right Click down
+                    this._mouseDown(evt, state);
+
+                    break;
+                case 2:
+                    // Right Click up
+                    this._mouseUp(evt, state);
+                    break;
+            }
+
+        });
+
+        this._ui = new Hud(scene);
+        // Set up Mobile Controls if on mobile device
         if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
             this._setUpMobile();
-        }*/
+        }
+        this._engine = this._scene.getEngine();
+        const engine = this._engine;
+        this._scene.getEngine().getInputElement().addEventListener('click', function (){
+            if(!engine.isPointerLock) {
+                engine.enterPointerlock();
+                console.log("Pointer lock okay");
+            }
+        })
+    }
+
+    /**
+     *
+     * @param {PointerInfo} evt
+     * @param {Event} state
+     */
+    _mouseUp(evt, state) {
+        this._isMouseMoving = false;
+        this._isMouseReference = null;
+    }
+
+    /**
+     *
+     * @param {PointerInfo} evt
+     * @param {Event} state
+     */
+    _mouseDown(evt, state) {
+        this._isMouseMoving = true;
+        this._isMouseReference = {
+            x: evt.event.clientX,
+            y: evt.event.clientY,
+        };
+    }
+
+    /**
+     *
+     * @param {PointerInfo} evt
+     * @param {Event} state
+     */
+    _mouseMove(evt, state) {
+
+        if(this._isMouseMoving) {
+            this._isMousePosition = evt.event;
+            if (this._isMouseReference) {
+                let offsetX;
+                let offsetY;
+                if(this._engine.isPointerLock) {
+                    offsetX = evt.event.movementX;
+                    offsetY = evt.event.movementY;
+                } else {
+                    offsetX = evt.event.clientX - this._isMouseReference.x;
+                    offsetY = evt.event.clientY - this._isMouseReference.y;
+
+                    this._isMouseReference = {
+                        x: evt.event.clientX,
+                        y: evt.event.clientY,
+                    };
+                }
+
+                if (this._allowCameraRotation) {
+                    this._rotationTarget.rotation.y += offsetX / this.mouseSensitivity;
+                    this._rotationTarget.rotation.x += offsetY / this.mouseSensitivity;
+                }
+
+            }
+        }
+    }
+
+    attachControl(camRoot) {
+        this._allowCameraRotation = true;
+        this._rotationTarget = camRoot;
     }
 
     // Keyboard controls & Mobile controls
@@ -66,7 +177,7 @@ export class PlayerInput {
     private _updateFromKeyboard(): void {
 
         //forward - backwards movement
-        if ((this.inputMap["ArrowUp"] || this.mobileUp)) {
+        if ((this.inputMap["ArrowUp"] || this.mobileUp || this.inputMap["w"])) {
             this.verticalAxis = 1;
             this.vertical = Scalar.Lerp(this.vertical, 1, 0.2);
 
@@ -108,7 +219,7 @@ export class PlayerInput {
             this.jumpKeyDown = false;
         }
     }
-/*
+
     // Mobile controls
     private _setUpMobile(): void {
         //Jump Button
@@ -155,5 +266,5 @@ export class PlayerInput {
         this._ui.downBtn.onPointerUpObservable.add(() => {
             this.mobileDown = false;
         });
-    }*/
+    }
 }

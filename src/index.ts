@@ -32,7 +32,17 @@ const ground = createEarth(scene); //'ground1', { width: 6, height: 6, subdivisi
 ground.checkCollisions = true;
 generateRandomTrees(ground);
 
-initializePlayer(scene).then(()=>{
+declare global {
+    interface Window { game: any; }
+}
+
+window.game = window.game || {};
+
+
+
+initializePlayer(scene).then((player)=>{
+    window.game.player = player;
+    window.game.scene = scene;
     scene.executeWhenReady(()=>{
         engine.runRenderLoop(() => {
             scene.render();
@@ -41,7 +51,7 @@ initializePlayer(scene).then(()=>{
 });
 
 
-scene.debugLayer.show();
+//scene.debugLayer.show();
 
 /**
  * @param {Scene} scene
@@ -231,6 +241,7 @@ async function initializePlayer(scene) {
     //Create the player
     const player = new Player(assets, scene, shadowGenerator, _input);
     const camera = player.activatePlayerCamera();
+    return player;
 }
 
 function addBoxToScene() {
