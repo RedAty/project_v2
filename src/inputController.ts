@@ -3,7 +3,7 @@ import {
     ActionManager,
     ExecuteCodeAction,
     Scalar,
-    PointerInfo,
+    PointerInfo, Vector3,
 } from '@babylonjs/core';
 import {Hud} from "./hud";
 import {PointerEventTypes} from "@babylonjs/core/Events/pointerEvents";
@@ -41,6 +41,7 @@ export class PlayerInput {
     private mouseSensitivity: number;
     private _allowCameraRotation: any;
     private _rotationTarget: any;
+    public _isMouseApply: boolean;
 
     constructor(scene: Scene) {
 
@@ -101,13 +102,9 @@ export class PlayerInput {
             this._setUpMobile();
         }
         this._engine = this._scene.getEngine();
-        const engine = this._engine;
-        this._scene.getEngine().getInputElement().addEventListener('click', function (){
-            if(!engine.isPointerLock) {
-                engine.enterPointerlock();
-                console.log("Pointer lock okay");
-            }
-        })
+        this._isMouseMoving = false;
+        this._isMouseApply = false;
+
     }
 
     /**
@@ -117,7 +114,11 @@ export class PlayerInput {
      */
     _mouseUp(evt, state) {
         this._isMouseMoving = false;
+        this._isMouseApply = false;
         this._isMouseReference = null;
+        if(this._engine.isPointerLock) {
+            this._engine.exitPointerlock();
+        }
     }
 
     /**
@@ -126,6 +127,12 @@ export class PlayerInput {
      * @param {Event} state
      */
     _mouseDown(evt, state) {
+        if(!this._engine.isPointerLock) {
+            this._engine.enterPointerlock();
+        }
+        if(evt.event.button === 2) {
+            this._isMouseApply = true;
+        }
         this._isMouseMoving = true;
         this._isMouseReference = {
             x: evt.event.clientX,
@@ -162,7 +169,6 @@ export class PlayerInput {
                     this._rotationTarget.rotation.y += offsetX / this.mouseSensitivity;
                     this._rotationTarget.rotation.x += offsetY / this.mouseSensitivity;
                 }
-
             }
         }
     }

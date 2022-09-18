@@ -17,7 +17,7 @@ import {
     Sound,
     Observable,
     ShadowGenerator,
-    ArcRotateCamera
+    ArcRotateCamera, Skeleton, Bone
 } from "@babylonjs/core";
 import { PlayerInput } from "./inputController";
 
@@ -89,6 +89,7 @@ export class Player extends TransformNode {
     public tutorial_dash;
     public tutorial_jump;
     private _animationGroups;
+    private skeleton: Skeleton;
 
     constructor(assets, scene: Scene, shadowGenerator: ShadowGenerator, input?: PlayerInput) {
         super("player", scene);
@@ -98,6 +99,7 @@ export class Player extends TransformNode {
         this._loadSounds(this.scene);
         //camera
         this.mesh = assets.mesh;
+        this.skeleton = assets.skeleton;
         this.mesh.parent = this;
         this._setupPlayerCamera();
 
@@ -216,7 +218,7 @@ export class Player extends TransformNode {
 
         //check if there is movement to determine if rotation is needed
         let input = new Vector3(this._input.horizontalAxis, 0, this._input.verticalAxis); //along which axis is the direction
-        if (input.length() == 0) {//if there's no input detected, prevent rotation and keep player in same rotation
+        if (input.length() == 0 && !this._input._isMouseApply) {//if there's no input detected, prevent rotation and keep player in same rotation
             return;
         }
 

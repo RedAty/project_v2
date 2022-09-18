@@ -16,7 +16,7 @@ import {
 } from "@babylonjs/core";
 import {addLabelToMesh} from "./gui";
 import {Player} from "./characterController";
-import {PlayerInput} from "./inputController"; // Injects a local ES6 version of the inspector to prevent automatically relying on the none compatible version
+import {PlayerInput} from "./inputController";
 
 // Get the canvas element from the DOM.
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
@@ -218,7 +218,8 @@ async function loadCharacterAssets(scene) {
 
             return {
                 mesh: outer as Mesh,
-                animationGroups: result.animationGroups
+                animationGroups: result.animationGroups,
+                skeleton: result.skeletons[0]
             }
         });
     }
@@ -226,7 +227,7 @@ async function loadCharacterAssets(scene) {
 
 }
 
-async function initializePlayer(scene) {
+async function initializePlayer(scene): Promise<Player> {
     const light = new PointLight("sparklight", new Vector3(0, 0, 0), scene);
     light.diffuse = new Color3(0.08627450980392157, 0.10980392156862745, 0.15294117647058825);
     light.intensity = 35;
